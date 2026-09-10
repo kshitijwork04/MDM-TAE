@@ -1,21 +1,78 @@
 // Library Book Reservation System — Backend
-// Express + @libsql/client to talk to Turso (cloud SQLite)
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const { createClient } = require("@libsql/client");
+// Zero dependencies: Node's built-in http + fetch only.
+// Talks to Turso (cloud SQLite) through its HTTP API. Run with: node server.js
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const http = require("http");
+const fs = require("fs");
 
-// connect to Turso using the URL from .env (token only if your db uses one)
-const db = createClient({
-    url: process.env.TURSO_URL,
-    ...(process.env.TURSO_AUTH_TOKEN ? { authToken: process.env.TURSO_AUTH_TOKEN } : {}),
-});
+// ---- load .env by hand (no dotenv needed) ----
+function loadEnv() {
+    const env = {};
+    try {
+        const lines = fs.readFileSync(__dirname + "/.env", "utf8").split("\n");
+        for (const line of lines) {
+            const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
+            if (match) env[match[1]] = match[2].replace(/^["']|["']$/g, "");
+        }
+    } catch { /* .env missing -> fall back to process env */ }
+    for (const key of Object.keys(process.env)) if (!(key in env)) env[key] = process.env[key];
+    return env;
+}
 
-// sample books used only the first time the table is empty
+const env = loadEnv();
+
+// ---- Turso connection ----
+const TURSO_HTTP_URL = (env.TURSO_URL || "").replace("libsql://", "https://") + "/v2/pipeline";
+const AUTH = "Bearer " + env.TURSO_AUTH_TOKEN;
+
+// turso's http api wants args as tagged values, e.g. {type:"integer", value:"1"}
+function toValue(arg) {
+    if (arg === null || arg === undefined) return { type: "null" };
+    if (typeof arg === "number") {
+        return Number.isInteger(arg)
+            ? { type: "integer", value: String(arg) }
+            : { type: "float", value: String(arg) };
+    }
+    return { type: "text", value: String(arg) };
+}
+
+// run one SQL statement against Turso, returns { rows, lastInsertRowid, affectedRowCount }
+async function exec(sql, args = []) {
+    let body = JSON.stringify({
+        requests: [{ type: "execute", stmt: { sql, args: args.map(toValue) } }],
+    });
+
+    const resp = await fetch(TURSO_HTTP_URL, {
+        method: "POST",
+        headers: { "Authorization": AUTH, "Content-Type": "application/json" },
+        body,
+    });
+
+    if (!resp.ok) throw new Error("Turso HTTP " + resp.status + ": " + await resp.text());
+
+    const data = await resp.json();
+    const result = data.results[0];
+
+    if (result.type !== "ok") throw new Error(JSON.stringify(result));
+    const res = result.response.result;
+
+    // turso returns values like { type: "integer", value: "3" } -> convert to plain values
+    const rows = res.rows.map((r) => {
+        const row = {};
+        res.cols.forEach((col, i) => {
+            row[col.name] = r[i]?.value ?? null;
+        });
+        return row;
+    });
+
+    return {
+        rows,
+        lastInsertRowid: res.last_insert_rowid == null ? null : Number(res.last_insert_rowid),
+        affectedRowCount: res.affected_row_count,
+    };
+}
+
+// ---- sample books used only the first time the table is empty ----
 const sampleBooks = [
     ["The Great Gatsby", "F. Scott Fitzgerald", "Fiction", 4, 3],
     ["1984", "George Orwell", "Fiction", 3, 0],
@@ -30,151 +87,133 @@ const sampleBooks = [
 ];
 
 async function setupDatabase() {
-    // create tables if they don't exist
-    await db.execute(`
-        CREATE TABLE IF NOT EXISTS books (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            author TEXT NOT NULL,
-            genre TEXT NOT NULL,
-            total_copies INTEGER NOT NULL,
-            available_copies INTEGER NOT NULL
-        )
-    `);
-    await db.execute(`
-        CREATE TABLE IF NOT EXISTS reservations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            book_id INTEGER NOT NULL,
-            user_name TEXT NOT NULL,
-            mobile TEXT NOT NULL,
-            reserved_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (book_id) REFERENCES books(id)
-        )
-    `);
+    await exec(`CREATE TABLE IF NOT EXISTS books (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        author TEXT NOT NULL,
+        genre TEXT NOT NULL,
+        total_copies INTEGER NOT NULL,
+        available_copies INTEGER NOT NULL
+    )`);
+
+    await exec(`CREATE TABLE IF NOT EXISTS reservations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        mobile TEXT NOT NULL,
+        reserved_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (book_id) REFERENCES books(id)
+    )`);
 
     // seed books only if the table is empty
-    const row = await db.execute("SELECT COUNT(*) AS count FROM books");
-    const count = row.rows[0].count;
-
-    if (count === 0) {
+    const { rows } = await exec("SELECT COUNT(*) AS count FROM books");
+    if (Number(rows[0].count) === 0) {
         for (const b of sampleBooks) {
-            await db.execute({
-                sql: `INSERT INTO books (title, author, genre, total_copies, available_copies)
-                      VALUES (?, ?, ?, ?, ?)`,
-                args: b,
-            });
+            await exec(`INSERT INTO books (title, author, genre, total_copies, available_copies)
+                        VALUES (?, ?, ?, ?, ?)`, b);
         }
         console.log("Seeded " + sampleBooks.length + " books");
     }
 }
 
-// ---- API Routes ----
+// ---- helpers ----
+function json(res, status, obj) {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(obj));
+}
 
-// GET all books
-app.get("/api/books", async (req, res) => {
-    try {
-        const { rows } = await db.execute("SELECT * FROM books ORDER BY title");
-        res.json(rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+async function readBody(req) {
+    return new Promise((resolve) => {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+            try { resolve(JSON.parse(body || "{}")); }
+            catch { resolve({}); }
+        });
+    });
+}
 
-// GET all reservations (joined with book title)
-app.get("/api/reservations", async (req, res) => {
-    try {
-        const { rows } = await db.execute(`
-            SELECT reservations.id, reservations.book_id, reservations.user_name,
-                   reservations.mobile, reservations.reserved_at,
-                   books.title, books.author, books.genre
-            FROM reservations
-            JOIN books ON books.id = reservations.book_id
-            ORDER BY reservations.reserved_at DESC
-        `);
-        res.json(rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+// ---- routes ----
+async function handleRequest(req, res) {
+    const url = new URL(req.url, "http://localhost");
+    const path = url.pathname.split("?")[0];
 
-// POST reserve a book
-app.post("/api/reserve", async (req, res) => {
-    const { bookId, name, mobile } = req.body;
+    // static frontend files
+    if (req.method === "GET" && path === "/") return serveFile(res, "index.html", "text/html");
+    if (req.method === "GET" && path === "/functions.js") return serveFile(res, "functions.js", "text/javascript");
 
-    if (!bookId || !name || !mobile) {
-        return res.status(400).json({ error: "bookId, name and mobile are required" });
+    // GET /api/books
+    if (req.method === "GET" && path === "/api/books") {
+        try {
+            const { rows } = await exec("SELECT * FROM books ORDER BY title");
+            return json(res, 200, rows);
+        } catch (e) { return json(res, 500, { error: e.message }); }
     }
 
-    try {
-        // check availability
-        const { rows } = await db.execute({
-            sql: "SELECT * FROM books WHERE id = ?",
-            args: [bookId],
-        });
-
-        if (rows.length === 0) {
-            return res.status(404).json({ error: "Book not found" });
-        }
-
-        const book = rows[0];
-        if (book.available_copies <= 0) {
-            return res.status(400).json({ error: "No copies available" });
-        }
-
-        // decrement available copies and insert reservation (atomic-ish)
-        await db.execute({
-            sql: "UPDATE books SET available_copies = available_copies - 1 WHERE id = ? AND available_copies > 0",
-            args: [bookId],
-        });
-
-        const result = await db.execute({
-            sql: "INSERT INTO reservations (book_id, user_name, mobile) VALUES (?, ?, ?)",
-            args: [bookId, name, mobile],
-        });
-
-        res.json({ success: true, reservationId: Number(result.lastInsertRowid) });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    // GET /api/reservations
+    if (req.method === "GET" && path === "/api/reservations") {
+        try {
+            const { rows } = await exec(`SELECT reservations.id, reservations.book_id, reservations.user_name,
+                                                 reservations.mobile, reservations.reserved_at,
+                                                 books.title, books.author, books.genre
+                                          FROM reservations
+                                          JOIN books ON books.id = reservations.book_id
+                                          ORDER BY reservations.reserved_at DESC`);
+            return json(res, 200, rows);
+        } catch (e) { return json(res, 500, { error: e.message }); }
     }
-});
 
-// DELETE cancel a reservation
-app.delete("/api/reservations/:id", async (req, res) => {
-    try {
-        const { rows } = await db.execute({
-            sql: "SELECT * FROM reservations WHERE id = ?",
-            args: [req.params.id],
-        });
+    // POST /api/reserve
+    if (req.method === "POST" && path === "/api/reserve") {
+        const { bookId, name, mobile } = await readBody(req);
+        if (!bookId || !name || !mobile) return json(res, 400, { error: "bookId, name and mobile are required" });
 
-        if (rows.length === 0) {
-            return res.status(404).json({ error: "Reservation not found" });
-        }
+        try {
+            const { rows } = await exec("SELECT * FROM books WHERE id = ?", [bookId]);
+            if (rows.length === 0) return json(res, 404, { error: "Book not found" });
+            if (Number(rows[0].available_copies) <= 0) return json(res, 400, { error: "No copies available" });
 
-        // put the copy back
-        await db.execute({
-            sql: "UPDATE books SET available_copies = available_copies + 1 WHERE id = ?",
-            args: [rows[0].book_id],
-        });
+            // take a copy + record the reservation
+            await exec("UPDATE books SET available_copies = available_copies - 1 WHERE id = ?", [bookId]);
+            const result = await exec("INSERT INTO reservations (book_id, user_name, mobile) VALUES (?, ?, ?)", [bookId, name, mobile]);
 
-        await db.execute({
-            sql: "DELETE FROM reservations WHERE id = ?",
-            args: [req.params.id],
-        });
-
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+            return json(res, 200, { success: true, reservationId: result.lastInsertRowid });
+        } catch (e) { return json(res, 500, { error: e.message }); }
     }
-});
 
-// serve the frontend files (only index.html and functions.js — nothing else)
-app.get("/", (req, res) => res.sendFile(__dirname + "/index.html"));
-app.get("/functions.js", (req, res) => res.sendFile(__dirname + "/functions.js"));
+    // DELETE /api/reservations/:id
+    const delMatch = path.match(/^\/api\/reservations\/(\d+)$/);
+    if (req.method === "DELETE" && delMatch) {
+        const id = delMatch[1];
+        try {
+            const { rows } = await exec("SELECT * FROM reservations WHERE id = ?", [id]);
+            if (rows.length === 0) return json(res, 404, { error: "Reservation not found" });
 
+            // put the copy back, then delete the reservation
+            await exec("UPDATE books SET available_copies = available_copies + 1 WHERE id = ?", [rows[0].book_id]);
+            await exec("DELETE FROM reservations WHERE id = ?", [id]);
+
+            return json(res, 200, { success: true });
+        } catch (e) { return json(res, 500, { error: e.message }); }
+    }
+
+    json(res, 404, { error: "Not found" });
+}
+
+function serveFile(res, file, type) {
+    fs.readFile(__dirname + "/" + file, (err, data) => {
+        if (err) return json(res, 404, { error: "Not found" });
+        res.writeHead(200, { "Content-Type": type });
+        res.end(data);
+    });
+}
+
+// ---- start ----
 setupDatabase()
     .then(() => {
-        app.listen(process.env.PORT || 3000, () => {
-            console.log("Server running at http://localhost:" + (process.env.PORT || 3000));
+        const PORT = Number(env.PORT || 3000);
+        http.createServer(handleRequest).listen(PORT, () => {
+            console.log("Server running at http://localhost:" + PORT);
         });
     })
     .catch((error) => {

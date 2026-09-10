@@ -1,27 +1,24 @@
 # Library Book Reservation System
 
-A library UI to search books, check availability, and reserve copies. Built with HTML, Tailwind CSS, vanilla JS, Express, and a Turso (cloud SQLite) database.
+A library UI to search books, check availability, and reserve copies. Built with HTML, Tailwind CSS, vanilla JS, and Node.js talking to a Turso (cloud SQLite) database. **Zero npm packages** — just Node's built-in `http` and `fetch`. All you need is Node.js installed.
 
 ## How to run
 
-1. Install dependencies:
-   ```
-   npm install
-   ```
-
-2. Create a `.env` file (already present locally) with your Turso database credentials:
+1. Create a `.env` file (if not present) with your Turso database credentials:
    ```
    TURSO_URL=libsql://your-database.turso.io
    TURSO_AUTH_TOKEN=your-token
    PORT=3000
    ```
 
-3. Start the server:
+2. Start the server:
    ```
-   npm start
+   node server.js
    ```
 
-4. Open http://localhost:3000 in your browser.
+3. Open http://localhost:3000 in your browser.
+
+That's it — no `npm install`, no `node_modules`, no `package.json`.
 
 ## Features
 
@@ -34,4 +31,4 @@ A library UI to search books, check availability, and reserve copies. Built with
 
 ## Note
 
-`.env` and `node_modules/` are gitignored — get Turso credentials from https://turso.tech and never push your token.
+`.env` is gitignored — get Turso credentials from https://turso.tech and never push your token.
