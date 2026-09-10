@@ -3,9 +3,12 @@
 // this file just loads them through the API and re-renders.
 let books = [];
 let myReservations = [];
-let savedName = "";
-let savedMobile = "";
+let savedName = localStorage.getItem("lbName") || "";
+let savedMobile = localStorage.getItem("lbMobile") || "";
 let pendingBookId = null;
+
+// restore the user badge if name was saved last time
+if (savedName) updateUserBadge();
 
 // genre colors — saturated, visible
 const genreColor = {
@@ -51,14 +54,15 @@ async function loadData() {
     const res = await fetch("/api/books");
     const bookRows = await res.json();
 
-    // the database returns snake_case columns, renaming them for the view
+    // the database returns snake_case columns and all values as strings,
+    // so convert the numbers to real numbers (otherwise "0"+"4" = "04")
     books = bookRows.map(b => ({
-        id: b.id,
+        id: Number(b.id),
         title: b.title,
         author: b.author,
         genre: b.genre,
-        totalCopies: b.total_copies,
-        availableCopies: b.available_copies,
+        totalCopies: Number(b.total_copies),
+        availableCopies: Number(b.available_copies),
     }));
 
     // get reservations (already joined with book info on the server)
@@ -66,8 +70,8 @@ async function loadData() {
     const reservRows = await res2.json();
 
     myReservations = reservRows.map(r => ({
-        id: r.id,
-        bookId: r.book_id,
+        id: Number(r.id),
+        bookId: Number(r.book_id),
         title: r.title,
         author: r.author,
         genre: r.genre,
@@ -218,15 +222,6 @@ function filterBooks() {
     }));
 }
 
-function getFilteredBooks() {
-    let q = searchInput.value.toLowerCase().trim();
-    let g = genreFilter.value;
-    return books.filter(b => {
-        let ok = b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q);
-        return ok && (g === "all" || b.genre === g);
-    });
-}
-
 // ---- Modal ----
 function openReserveModal(bookId) {
     let book = books.find(b => b.id === bookId);
@@ -283,9 +278,14 @@ async function confirmReserve() {
 
     if (!valid) return;
 
+    // prevent double-click creating two reservations
+    modalConfirm.disabled = true;
+
     // remember for next time
     savedName = name;
     savedMobile = mobile;
+    localStorage.setItem("lbName", name);
+    localStorage.setItem("lbMobile", mobile);
     updateUserBadge();
 
     // ask the server to reserve this book
@@ -299,9 +299,11 @@ async function confirmReserve() {
 
     if (data.success) {
         closeModal();
+        modalConfirm.disabled = false;
         await loadData();      // refresh books & reservations from db
         showToast("Reserved");
     } else {
+        modalConfirm.disabled = false;
         showToast("Failed: " + (data.error || "unknown error"));
     }
 }
