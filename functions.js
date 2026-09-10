@@ -1,6 +1,6 @@
 // ---- State ----
-// books and reservations now live in the Turso database (backend).
-// this file just loads them through the API and re-renders.
+// Everything lives in the browser via localStorage — no server, no database,
+// just works by opening index.html in any browser.
 let books = [];
 let myReservations = [];
 // who is logged in (demo auth — set by login.html)
@@ -49,38 +49,49 @@ const modalConfirm = document.getElementById("modalConfirm");
 const nameError = document.getElementById("nameError");
 const mobileError = document.getElementById("mobileError");
 
-// ---- Load data from the API ----
-async function loadData() {
-    // get all books from the server
-    const res = await fetch("/api/books");
-    const bookRows = await res.json();
+// the starting catalogue — used only the first time (seeds localStorage)
+function seedBooks() {
+    return [
+        { id: 1, title: "The Great Gatsby", author: "F. Scott Fitzgerald", genre: "Fiction", totalCopies: 4, availableCopies: 3 },
+        { id: 2, title: "1984", author: "George Orwell", genre: "Fiction", totalCopies: 3, availableCopies: 0 },
+        { id: 3, title: "To Kill a Mockingbird", author: "Harper Lee", genre: "Fiction", totalCopies: 5, availableCopies: 2 },
+        { id: 4, title: "A Brief History of Time", author: "Stephen Hawking", genre: "Science", totalCopies: 2, availableCopies: 2 },
+        { id: 5, title: "The Hobbit", author: "J.R.R. Tolkien", genre: "Fantasy", totalCopies: 3, availableCopies: 1 },
+        { id: 6, title: "Pride and Prejudice", author: "Jane Austen", genre: "Fiction", totalCopies: 4, availableCopies: 4 },
+        { id: 7, title: "Sapiens", author: "Yuval Noah Harari", genre: "Non-Fiction", totalCopies: 2, availableCopies: 0 },
+        { id: 8, title: "The Alchemist", author: "Paulo Coelho", genre: "Fiction", totalCopies: 3, availableCopies: 2 },
+        { id: 9, title: "Atomic Habits", author: "James Clear", genre: "Non-Fiction", totalCopies: 4, availableCopies: 3 },
+        { id: 10, title: "Harry Potter and the Sorcerer's Stone", author: "J.K. Rowling", genre: "Fantasy", totalCopies: 5, availableCopies: 1 },
+    ];
+}
 
-    // the database returns snake_case columns and all values as strings,
-    // so convert the numbers to real numbers (otherwise "0"+"4" = "04")
-    books = bookRows.map(b => ({
-        id: Number(b.id),
-        title: b.title,
-        author: b.author,
-        genre: b.genre,
-        totalCopies: Number(b.total_copies),
-        availableCopies: Number(b.available_copies),
-    }));
+function saveBooks()    { localStorage.setItem("lbBooks", JSON.stringify(books)); }
+function saveReservations() { localStorage.setItem("lbReservations", JSON.stringify(myReservations)); }
 
-    // get reservations (already joined with book info on the server)
-    const res2 = await fetch("/api/reservations");
-    const reservRows = await res2.json();
+// ---- Load data from localStorage ----
+function loadData() {
+    let raw = localStorage.getItem("lbBooks");
+    if (!raw) {
+        books = seedBooks();
+        saveBooks();
+    } else {
+        books = JSON.parse(raw);
+    }
 
-    myReservations = reservRows.map(r => ({
-        id: Number(r.id),
-        bookId: Number(r.book_id),
-        title: r.title,
-        author: r.author,
-        genre: r.genre,
-        reservedBy: r.user_name,
-        mobile: r.mobile,
-    }));
+    // reservations only store the book id, so attach the book's title/author/genre
+    myReservations = (JSON.parse(localStorage.getItem("lbReservations") || "[]")).map(r => {
+        let b = books.find(x => x.id === r.bookId);
+        return {
+            id: r.id,
+            bookId: r.bookId,
+            title: b ? b.title : "Unknown book",
+            author: b ? b.author : "",
+            genre: b ? b.genre : "",
+            reservedBy: r.reservedBy,
+            mobile: r.mobile,
+        };
+    });
 
-    // populate genre filter once, then render
     populateGenreFilter();
     filterBooks();            // respects any active search/genre filter
     renderReservations();
@@ -141,7 +152,7 @@ function updateUserBadge() {
 
 function logout() {
     sessionStorage.removeItem("lbUser");
-    window.location.href = "/";
+    window.location.href = "index.html";
 }
 
 // ---- Render Books ----
@@ -150,6 +161,7 @@ function renderBooks(bookList) {
         bookGrid.innerHTML = "";
         noResults.classList.remove("hidden");
         bookCount.textContent = "0 books";
+        updateStats();
         return;
     }
 
@@ -258,7 +270,7 @@ function filterBooks() {
 function openReserveModal(bookId) {
     // reserving requires a login — send guests to the login page first
     if (!currentUser) {
-        window.location.href = "login.html?next=%2F";
+        window.location.href = "login.html";
         return;
     }
 
@@ -293,8 +305,8 @@ function closeModal() {
     pendingBookId = null;
 }
 
-// confirm the reservation → saves it to the database via the API
-async function confirmReserve() {
+// confirm the reservation — saves straight to localStorage
+function confirmReserve() {
     // name is taken from the login session, only mobile is validated
     let name = currentUser;
     let mobile = modalMobile.value.trim();
@@ -318,39 +330,50 @@ async function confirmReserve() {
     savedMobile = mobile;
     localStorage.setItem("lbMobile", mobile);
 
-    // ask the server to reserve this book
-    const res = await fetch("/api/reserve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bookId: pendingBookId, name, mobile }),
+    let book = books.find(b => b.id === pendingBookId);
+    if (!book || book.availableCopies <= 0) {
+        modalConfirm.disabled = false;
+        showToast("Failed: no copies left");
+        return;
+    }
+
+    // take a copy + record the reservation
+    book.availableCopies -= 1;
+    myReservations.push({
+        id: Date.now(),
+        bookId: book.id,
+        reservedBy: name,
+        mobile: mobile,
+        time: new Date().toISOString(),
     });
 
-    const data = await res.json();
+    saveBooks();
+    saveReservations();
 
-    if (data.success) {
-        closeModal();
-        modalConfirm.disabled = false;
-        await loadData();      // refresh books & reservations from db
-        showToast("Reserved");
-    } else {
-        modalConfirm.disabled = false;
-        showToast("Failed: " + (data.error || "unknown error"));
-    }
+    modalConfirm.disabled = false;
+    closeModal();
+    loadData();
+    showToast("Reserved");
 }
 
 // ---- Cancel ----
-async function cancelReservation(reservationId) {
-    const res = await fetch("/api/reservations/" + reservationId, {
-        method: "DELETE",
-    });
-    const data = await res.json();
-
-    if (data.success) {
-        await loadData();
-        showToast("Reservation cancelled");
-    } else {
+function cancelReservation(reservationId) {
+    let idx = myReservations.findIndex(r => r.id === reservationId);
+    if (idx === -1) {
         showToast("Failed to cancel");
+        return;
     }
+
+    // put the copy back, then remove the reservation
+    let book = books.find(b => b.id === myReservations[idx].bookId);
+    if (book) book.availableCopies += 1;
+
+    myReservations.splice(idx, 1);
+    saveBooks();
+    saveReservations();
+
+    loadData();
+    showToast("Reservation cancelled");
 }
 
 // ---- Toast ----

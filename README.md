@@ -1,24 +1,18 @@
 # Library Book Reservation System
 
-A library UI to search books, check availability, and reserve copies. Built with HTML, Tailwind CSS, vanilla JS, and Node.js talking to a Turso (cloud SQLite) database. **Zero npm packages** — just Node's built-in `http` and `fetch`. All you need is Node.js installed.
+A library UI to search books, check availability, and reserve copies. Built with HTML, Tailwind CSS, and vanilla JavaScript.
+
+**No server, no database setup, no packages, no internet needed** — all data is saved in the browser's `localStorage`, exactly like a local database. It works by simply opening the page.
 
 ## How to run
 
-1. Create a `.env` file (if not present) with your Turso database credentials:
-   ```
-   TURSO_URL=libsql://your-database.turso.io
-   TURSO_AUTH_TOKEN=your-token
-   PORT=3000
-   ```
+Just open `index.html` in any browser (double-click the file). That's it.
 
-2. Start the server:
-   ```
-   node server.js
-   ```
+Or if you prefer, open `login.html` first and log in.
 
-3. Open http://localhost:3000 in your browser.
+## Demo login
 
-That's it — no `npm install`, no `node_modules`, no `package.json`.
+Any name, password: `1234`
 
 ## Features
 
@@ -29,8 +23,14 @@ That's it — no `npm install`, no `node_modules`, no `package.json`.
 - Cancel reservations
 - "My Reservations" shows only the logged-in user's reservations
 - Availability stats that update live
-- Books and reservations persist in the Turso database
+- Books and reservations persist between visits (browser localStorage)
+
+## Files
+
+- `index.html` — homepage
+- `login.html` — demo login page
+- `functions.js` — all the logic and local "database" (localStorage)
 
 ## Note
 
-`.env` is gitignored — get Turso credentials from https://turso.tech and never push your token.
+Data lives in the browser, so it is tied to the device/browser you used. If the browser history/storage is cleared, the library resets to the starting catalogue automatically.

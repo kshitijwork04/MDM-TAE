@@ -38,7 +38,7 @@
                 </div>
                 <span class="text-[15px] font-bold text-zinc-900">LibraryHub</span>
             </div>
-            <a href="/" class="text-[13px] font-semibold text-zinc-500 hover:text-zinc-900 transition">Back to books</a>
+            <a href="index.html" class="text-[13px] font-semibold text-zinc-500 hover:text-zinc-900 transition">Back to books</a>
         </div>
     </header>
 
@@ -79,10 +79,10 @@
 
         // if already logged in, go straight to the library
         if (sessionStorage.getItem("lbUser")) {
-            window.location.href = "/";
+            window.location.href = "index.html";
         }
 
-        async function doLogin() {
+        function doLogin() {
             const name = nameInput.value.trim();
             const password = passInput.value;
 
@@ -90,32 +90,10 @@
 
             if (!name) { showError("Please enter your name"); return; }
             if (!password) { showError("Please enter your password"); return; }
+            if (password !== "1234") { showError("Wrong password — try 1234"); return; }
 
-            btn.disabled = true;
-            btn.textContent = "Logging in…";
-
-            try {
-                const res = await fetch("/api/login", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name, password }),
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    sessionStorage.setItem("lbUser", data.name);
-                    const next = new URLSearchParams(window.location.search).get("next") || "/";
-                    window.location.href = next;
-                } else {
-                    showError(data.error || "Login failed");
-                    btn.disabled = false;
-                    btn.textContent = "Log in";
-                }
-            } catch (err) {
-                showError("Could not reach the server. Is it running?");
-                btn.disabled = false;
-                btn.textContent = "Log in";
-            }
+            sessionStorage.setItem("lbUser", name);
+            window.location.href = "index.html";
         }
 
         function showError(msg) {
