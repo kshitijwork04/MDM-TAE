@@ -22,10 +22,12 @@ That's it — no `npm install`, no `node_modules`, no `package.json`.
 
 ## Features
 
+- Demo login page (any name, password `1234`) — required to reserve
 - Search books by title or author
 - Filter by genre
-- Reserve a copy (asks for name + mobile once, pre-fills next time)
+- Reserve a copy (name comes from your login, mobile is asked once and remembered)
 - Cancel reservations
+- "My Reservations" shows only the logged-in user's reservations
 - Availability stats that update live
 - Books and reservations persist in the Turso database
 

@@ -51,6 +51,16 @@
                     </div>
                     <span class="text-[12px] font-semibold text-zinc-700" id="userName"></span>
                 </div>
+                <a id="loginLink" href="login.html"
+                    class="text-[12px] font-bold bg-zinc-900 hover:bg-zinc-800 text-white px-4 py-1.5 rounded-full transition shadow-sm">
+                    Log in
+                </a>
+                <button id="logoutBtn" title="Log out"
+                    class="hidden w-8 h-8 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 rounded-full items-center justify-center transition">
+                    <svg class="w-3.5 h-3.5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                    </svg>
+                </button>
             </div>
         </div>
     </header>
@@ -123,6 +133,10 @@
                 <div class="bg-white rounded-2xl border border-zinc-200 shadow-sm p-5 sticky top-20">
                     <h2 class="text-[13px] font-bold text-zinc-900 uppercase tracking-wider mb-4">My Reservations</h2>
                     <div id="reservationList" class="space-y-0"></div>
+                    <div id="sidebarPrompt" class="text-center py-4 hidden">
+                        <p class="text-[12px] text-zinc-400 font-medium mb-2.5">Log in to see your reservations</p>
+                        <a href="login.html" class="inline-block text-[12px] font-bold bg-zinc-900 hover:bg-zinc-800 text-white px-4 py-2 rounded-lg transition">Log in</a>
+                    </div>
                     <div id="noReservations" class="text-center py-6">
                         <p class="text-[12px] text-zinc-400 font-medium">No reservations yet</p>
                     </div>

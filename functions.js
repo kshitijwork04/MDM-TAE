@@ -3,12 +3,13 @@
 // this file just loads them through the API and re-renders.
 let books = [];
 let myReservations = [];
-let savedName = localStorage.getItem("lbName") || "";
+// who is logged in (demo auth — set by login.html)
+let currentUser = sessionStorage.getItem("lbUser") || "";
 let savedMobile = localStorage.getItem("lbMobile") || "";
 let pendingBookId = null;
 
-// restore the user badge if name was saved last time
-if (savedName) updateUserBadge();
+// restore the user badge based on the login session
+updateUserBadge();
 
 // genre colors — saturated, visible
 const genreColor = {
@@ -37,6 +38,9 @@ const navCount = document.getElementById("navCount");
 const userBadge = document.getElementById("userBadge");
 const userInitial = document.getElementById("userInitial");
 const userNameEl = document.getElementById("userName");
+const loginLink = document.getElementById("loginLink");
+const logoutBtn = document.getElementById("logoutBtn");
+const sidebarPrompt = document.getElementById("sidebarPrompt");
 const reserveModal = document.getElementById("reserveModal");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const modalClose = document.getElementById("modalClose");
@@ -96,18 +100,26 @@ function populateGenreFilter() {
     });
 }
 
+// reservations that belong to the logged-in user
+function currentUserReservations() {
+    if (!currentUser) return [];
+    return myReservations.filter(r => r.reservedBy.toLowerCase() === currentUser.toLowerCase());
+}
+
 // ---- Stats ----
 function updateStats() {
     let total = books.reduce((s, b) => s + b.totalCopies, 0);
     let avail = books.reduce((s, b) => s + b.availableCopies, 0);
+    let mine = currentUserReservations().length;
+
     statTotal.textContent = total;
     statAvailable.textContent = avail;
-    statReserved.textContent = myReservations.length;
+    statReserved.textContent = mine;
 
-    if (myReservations.length > 0) {
+    if (mine > 0) {
         navReserved.classList.remove("hidden");
         navReserved.classList.add("inline-flex");
-        navCount.textContent = myReservations.length;
+        navCount.textContent = mine;
     } else {
         navReserved.classList.add("hidden");
         navReserved.classList.remove("inline-flex");
@@ -115,12 +127,24 @@ function updateStats() {
 }
 
 function updateUserBadge() {
-    if (savedName) {
+    if (currentUser) {
         userBadge.classList.remove("hidden");
         userBadge.classList.add("flex");
-        userInitial.textContent = savedName.charAt(0).toUpperCase();
-        userNameEl.textContent = savedName.split(" ")[0];
+        userInitial.textContent = currentUser.charAt(0).toUpperCase();
+        userNameEl.textContent = currentUser.split(" ")[0];
+        loginLink.classList.add("hidden");
+        logoutBtn.classList.remove("hidden");
+    } else {
+        userBadge.classList.add("hidden");
+        userBadge.classList.remove("flex");
+        loginLink.classList.remove("hidden");
+        logoutBtn.classList.add("hidden");
     }
+}
+
+function logout() {
+    sessionStorage.removeItem("lbUser");
+    window.location.href = "/";
 }
 
 // ---- Render Books ----
@@ -137,7 +161,7 @@ function renderBooks(bookList) {
 
     bookGrid.innerHTML = bookList.map(book => {
         let isAvail = book.availableCopies > 0;
-        let isReserved = myReservations.some(r => r.bookId === book.id);
+        let isReserved = currentUserReservations().some(r => r.bookId === book.id);
         let color = genreColor[book.genre] || "#4f46e5";
         let pct = book.totalCopies > 0 ? (book.availableCopies / book.totalCopies) * 100 : 0;
 
@@ -183,7 +207,18 @@ function renderBooks(bookList) {
 
 // ---- Render Reservations ----
 function renderReservations() {
-    if (myReservations.length === 0) {
+    if (!currentUser) {
+        // not logged in — show a prompt instead of a list
+        reservationList.innerHTML = "";
+        sidebarPrompt.classList.remove("hidden");
+        noReservations.classList.add("hidden");
+        updateStats();
+        return;
+    }
+    sidebarPrompt.classList.add("hidden");
+
+    let mine = currentUserReservations();
+    if (mine.length === 0) {
         reservationList.innerHTML = "";
         noReservations.classList.remove("hidden");
         updateStats();
@@ -192,7 +227,7 @@ function renderReservations() {
 
     noReservations.classList.add("hidden");
 
-    reservationList.innerHTML = myReservations.map(book => {
+    reservationList.innerHTML = mine.map(book => {
         let color = genreColor[book.genre] || "#4f46e5";
         return `
             <div class="flex items-center gap-2.5 py-2.5 border-b border-zinc-100 last:border-0">
@@ -224,6 +259,12 @@ function filterBooks() {
 
 // ---- Modal ----
 function openReserveModal(bookId) {
+    // reserving requires a login — send guests to the login page first
+    if (!currentUser) {
+        window.location.href = "login.html?next=%2F";
+        return;
+    }
+
     let book = books.find(b => b.id === bookId);
     if (!book) return;
 
@@ -231,7 +272,10 @@ function openReserveModal(bookId) {
     modalBookTitle.textContent = book.title;
     modalBookAuthor.textContent = book.author + "  ·  " + book.genre;
 
-    modalName.value = savedName;
+    // name comes from the login — locked, only mobile is asked
+    modalName.value = currentUser;
+    modalName.readOnly = true;
+    modalName.classList.add("bg-zinc-100", "text-zinc-500");
     modalMobile.value = savedMobile;
     nameError.classList.add("hidden");
     mobileError.classList.add("hidden");
@@ -242,7 +286,7 @@ function openReserveModal(bookId) {
     reserveModal.classList.add("flex");
     document.body.style.overflow = "hidden";
 
-    if (!savedName) modalName.focus();
+    modalMobile.focus();
 }
 
 function closeModal() {
@@ -254,18 +298,10 @@ function closeModal() {
 
 // confirm the reservation → saves it to the database via the API
 async function confirmReserve() {
-    let name = modalName.value.trim();
+    // name is taken from the login session, only mobile is validated
+    let name = currentUser;
     let mobile = modalMobile.value.trim();
     let valid = true;
-
-    if (!name) {
-        nameError.classList.remove("hidden");
-        modalName.classList.add("border-red-300");
-        valid = false;
-    } else {
-        nameError.classList.add("hidden");
-        modalName.classList.remove("border-red-300");
-    }
 
     if (!mobile || mobile.length !== 10 || !/^\d+$/.test(mobile)) {
         mobileError.classList.remove("hidden");
@@ -281,12 +317,9 @@ async function confirmReserve() {
     // prevent double-click creating two reservations
     modalConfirm.disabled = true;
 
-    // remember for next time
-    savedName = name;
+    // remember mobile for next time
     savedMobile = mobile;
-    localStorage.setItem("lbName", name);
     localStorage.setItem("lbMobile", mobile);
-    updateUserBadge();
 
     // ask the server to reserve this book
     const res = await fetch("/api/reserve", {
@@ -343,6 +376,7 @@ modalConfirm.addEventListener("click", confirmReserve);
 modalName.addEventListener("keydown", e => { if (e.key === "Enter") confirmReserve(); });
 modalMobile.addEventListener("keydown", e => { if (e.key === "Enter") confirmReserve(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+logoutBtn.addEventListener("click", logout);
 
 // boot up
 loadData();

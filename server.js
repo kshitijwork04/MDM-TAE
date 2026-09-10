@@ -140,6 +140,7 @@ async function handleRequest(req, res) {
 
     // static frontend files
     if (req.method === "GET" && path === "/") return serveFile(res, "index.html", "text/html");
+    if (req.method === "GET" && path === "/login.html") return serveFile(res, "login.html", "text/html");
     if (req.method === "GET" && path === "/functions.js") return serveFile(res, "functions.js", "text/javascript");
 
     // GET /api/books
@@ -179,6 +180,15 @@ async function handleRequest(req, res) {
 
             return json(res, 200, { success: true, reservationId: result.lastInsertRowid });
         } catch (e) { return json(res, 500, { error: e.message }); }
+    }
+
+    // POST /api/login  (demo auth: any name, fixed demo password)
+    if (req.method === "POST" && path === "/api/login") {
+        const { name, password } = await readBody(req);
+        const demoPassword = "1234"; // demo only — replace with real auth for production
+        if (!name || !name.trim()) return json(res, 400, { error: "Name is required" });
+        if (password !== demoPassword) return json(res, 401, { error: "Wrong password" });
+        return json(res, 200, { success: true, name: name.trim() });
     }
 
     // DELETE /api/reservations/:id
