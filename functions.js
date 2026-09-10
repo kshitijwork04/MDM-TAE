@@ -8,9 +8,6 @@ let currentUser = sessionStorage.getItem("lbUser") || "";
 let savedMobile = localStorage.getItem("lbMobile") || "";
 let pendingBookId = null;
 
-// restore the user badge based on the login session
-updateUserBadge();
-
 // genre colors — saturated, visible
 const genreColor = {
     "Fiction":     "#4f46e5",
@@ -85,7 +82,7 @@ async function loadData() {
 
     // populate genre filter once, then render
     populateGenreFilter();
-    renderBooks(books);
+    filterBooks();            // respects any active search/genre filter
     renderReservations();
 }
 
@@ -379,4 +376,5 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal()
 logoutBtn.addEventListener("click", logout);
 
 // boot up
+updateUserBadge();
 loadData();
