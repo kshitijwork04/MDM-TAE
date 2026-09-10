@@ -1,17 +1,7 @@
-// ---- Book Data ----
-let books = [
-    { id: 1, title: "The Great Gatsby", author: "F. Scott Fitzgerald", genre: "Fiction", totalCopies: 4, availableCopies: 3 },
-    { id: 2, title: "1984", author: "George Orwell", genre: "Fiction", totalCopies: 3, availableCopies: 0 },
-    { id: 3, title: "To Kill a Mockingbird", author: "Harper Lee", genre: "Fiction", totalCopies: 5, availableCopies: 2 },
-    { id: 4, title: "A Brief History of Time", author: "Stephen Hawking", genre: "Science", totalCopies: 2, availableCopies: 2 },
-    { id: 5, title: "The Hobbit", author: "J.R.R. Tolkien", genre: "Fantasy", totalCopies: 3, availableCopies: 1 },
-    { id: 6, title: "Pride and Prejudice", author: "Jane Austen", genre: "Fiction", totalCopies: 4, availableCopies: 4 },
-    { id: 7, title: "Sapiens", author: "Yuval Noah Harari", genre: "Non-Fiction", totalCopies: 2, availableCopies: 0 },
-    { id: 8, title: "The Alchemist", author: "Paulo Coelho", genre: "Fiction", totalCopies: 3, availableCopies: 2 },
-    { id: 9, title: "Atomic Habits", author: "James Clear", genre: "Non-Fiction", totalCopies: 4, availableCopies: 3 },
-    { id: 10, title: "Harry Potter and the Sorcerer's Stone", author: "J.K. Rowling", genre: "Fantasy", totalCopies: 5, availableCopies: 1 },
-];
-
+// ---- State ----
+// books and reservations now live in the Turso database (backend).
+// this file just loads them through the API and re-renders.
+let books = [];
 let myReservations = [];
 let savedName = "";
 let savedMobile = "";
@@ -55,12 +45,52 @@ const modalConfirm = document.getElementById("modalConfirm");
 const nameError = document.getElementById("nameError");
 const mobileError = document.getElementById("mobileError");
 
-// ---- Genre Dropdown ----
-[...new Set(books.map(b => b.genre))].forEach(g => {
-    let o = document.createElement("option");
-    o.value = g; o.textContent = g;
-    genreFilter.appendChild(o);
-});
+// ---- Load data from the API ----
+async function loadData() {
+    // get all books from the server
+    const res = await fetch("/api/books");
+    const bookRows = await res.json();
+
+    // the database returns snake_case columns, renaming them for the view
+    books = bookRows.map(b => ({
+        id: b.id,
+        title: b.title,
+        author: b.author,
+        genre: b.genre,
+        totalCopies: b.total_copies,
+        availableCopies: b.available_copies,
+    }));
+
+    // get reservations (already joined with book info on the server)
+    const res2 = await fetch("/api/reservations");
+    const reservRows = await res2.json();
+
+    myReservations = reservRows.map(r => ({
+        id: r.id,
+        bookId: r.book_id,
+        title: r.title,
+        author: r.author,
+        genre: r.genre,
+        reservedBy: r.user_name,
+        mobile: r.mobile,
+    }));
+
+    // populate genre filter once, then render
+    populateGenreFilter();
+    renderBooks(books);
+    renderReservations();
+}
+
+function populateGenreFilter() {
+    // only fill once so the dropdown doesn't duplicate options
+    if (genreFilter.options.length > 1) return;
+
+    [...new Set(books.map(b => b.genre))].forEach(g => {
+        let o = document.createElement("option");
+        o.value = g; o.textContent = g;
+        genreFilter.appendChild(o);
+    });
+}
 
 // ---- Stats ----
 function updateStats() {
@@ -103,7 +133,7 @@ function renderBooks(bookList) {
 
     bookGrid.innerHTML = bookList.map(book => {
         let isAvail = book.availableCopies > 0;
-        let isReserved = myReservations.some(r => r.id === book.id);
+        let isReserved = myReservations.some(r => r.bookId === book.id);
         let color = genreColor[book.genre] || "#4f46e5";
         let pct = book.totalCopies > 0 ? (book.availableCopies / book.totalCopies) * 100 : 0;
 
@@ -227,7 +257,8 @@ function closeModal() {
     pendingBookId = null;
 }
 
-function confirmReserve() {
+// confirm the reservation → saves it to the database via the API
+async function confirmReserve() {
     let name = modalName.value.trim();
     let mobile = modalMobile.value.trim();
     let valid = true;
@@ -252,35 +283,42 @@ function confirmReserve() {
 
     if (!valid) return;
 
+    // remember for next time
     savedName = name;
     savedMobile = mobile;
     updateUserBadge();
 
-    let book = books.find(b => b.id === pendingBookId);
-    if (!book || book.availableCopies === 0) return;
-
-    book.availableCopies--;
-    myReservations.push({
-        id: book.id, title: book.title, author: book.author, genre: book.genre,
-        reservedBy: savedName, mobile: savedMobile
+    // ask the server to reserve this book
+    const res = await fetch("/api/reserve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookId: pendingBookId, name, mobile }),
     });
 
-    closeModal();
-    renderBooks(getFilteredBooks());
-    renderReservations();
-    showToast("Reserved: " + book.title);
+    const data = await res.json();
+
+    if (data.success) {
+        closeModal();
+        await loadData();      // refresh books & reservations from db
+        showToast("Reserved");
+    } else {
+        showToast("Failed: " + (data.error || "unknown error"));
+    }
 }
 
 // ---- Cancel ----
-function cancelReservation(bookId) {
-    let book = books.find(b => b.id === bookId);
-    if (book) book.availableCopies++;
+async function cancelReservation(reservationId) {
+    const res = await fetch("/api/reservations/" + reservationId, {
+        method: "DELETE",
+    });
+    const data = await res.json();
 
-    let cancelled = myReservations.find(r => r.id === bookId);
-    myReservations = myReservations.filter(r => r.id !== bookId);
-    renderBooks(getFilteredBooks());
-    renderReservations();
-    showToast("Cancelled: " + (cancelled ? cancelled.title : "reservation"));
+    if (data.success) {
+        await loadData();
+        showToast("Reservation cancelled");
+    } else {
+        showToast("Failed to cancel");
+    }
 }
 
 // ---- Toast ----
@@ -304,6 +342,5 @@ modalName.addEventListener("keydown", e => { if (e.key === "Enter") confirmReser
 modalMobile.addEventListener("keydown", e => { if (e.key === "Enter") confirmReserve(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
-// initial render
-renderBooks(books);
-renderReservations();
+// boot up
+loadData();
