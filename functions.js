@@ -43,10 +43,8 @@ const modalBackdrop = document.getElementById("modalBackdrop");
 const modalClose = document.getElementById("modalClose");
 const modalBookTitle = document.getElementById("modalBookTitle");
 const modalBookAuthor = document.getElementById("modalBookAuthor");
-const modalName = document.getElementById("modalName");
 const modalMobile = document.getElementById("modalMobile");
 const modalConfirm = document.getElementById("modalConfirm");
-const nameError = document.getElementById("nameError");
 const mobileError = document.getElementById("mobileError");
 
 // the starting catalogue — used only the first time (seeds localStorage)
@@ -281,14 +279,9 @@ function openReserveModal(bookId) {
     modalBookTitle.textContent = book.title;
     modalBookAuthor.textContent = book.author + "  ·  " + book.genre;
 
-    // name comes from the login — locked, only mobile is asked
-    modalName.value = currentUser;
-    modalName.readOnly = true;
-    modalName.classList.add("bg-zinc-100", "text-zinc-500");
+    // name comes from the login session, only mobile is asked
     modalMobile.value = savedMobile;
-    nameError.classList.add("hidden");
     mobileError.classList.add("hidden");
-    modalName.classList.remove("border-red-300");
     modalMobile.classList.remove("border-red-300");
 
     reserveModal.classList.remove("hidden");
@@ -344,7 +337,6 @@ function confirmReserve() {
         bookId: book.id,
         reservedBy: name,
         mobile: mobile,
-        time: new Date().toISOString(),
     });
 
     saveBooks();
@@ -393,7 +385,6 @@ genreFilter.addEventListener("change", filterBooks);
 modalClose.addEventListener("click", closeModal);
 modalBackdrop.addEventListener("click", closeModal);
 modalConfirm.addEventListener("click", confirmReserve);
-modalName.addEventListener("keydown", e => { if (e.key === "Enter") confirmReserve(); });
 modalMobile.addEventListener("keydown", e => { if (e.key === "Enter") confirmReserve(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 logoutBtn.addEventListener("click", logout);
